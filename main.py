@@ -1,51 +1,98 @@
 import streamlit as st
+import requests
 import pandas as pd
-import plotly.graph_objects as go
-from utils import get_prediction
+import plotly.express as px
 
-st.set_page_config(page_title="Dashboard Crédit Client", layout="wide")
+# === Configuration de la page ===
+st.set_page_config(page_title="Dashboard Scoring Crédit", layout="wide")
+st.title("📊 Dashboard - Scoring Crédit Client")
 
-st.title("Dashboard Crédit Client")
+API_URL = "https://projet-7-implementation.onrender.com"
 
-client_id = st.text_input("Entrez l'identifiant du client")
+# === Chargement des données clients ===
+@st.cache_data
+def load_clients_data():
+    df = pd.read_csv("features_for_prediction.csv")
+    return df
 
-if client_id:
-    data = get_prediction(client_id)
-    
-    if "error" in data:
-        st.error(f"Erreur : {data['error']}")
+df_all_clients = load_clients_data()
+
+# === Sélection d'un client ===
+client_ids = df_all_clients["SK_ID_CURR"].unique()
+client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
+
+# === Données du client sélectionné ===
+data = df_all_clients[df_all_clients["SK_ID_CURR"] == client_id].iloc[0].to_dict()
+
+# === Requête à l'API ===
+def get_prediction(client_id):
+    try:
+        response = requests.post(
+            f"{API_URL}/predict", json={"SK_ID_CURR": int(client_id)}
+        )
+        return response.json()
+    except:
+        return {"error": "Erreur de connexion à l'API"}
+
+result = get_prediction(client_id)
+
+# === Vérification de la réponse API ===
+score = result.get("probability", None)
+if score is None:
+    st.error("❌ Erreur : le score n’a pas été reçu depuis l’API.")
+    st.write("Réponse de l'API :", result)
+    st.stop()
+
+# Décision binaire
+prediction = "Accord" if score >= 50 else "Refus"
+
+# === Affichage du score ===
+st.subheader(f"Client ID : {client_id}")
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.metric("Score de crédit (%)", f"{round(score, 2)}%")
+    if prediction == "Accord":
+        st.success(f"📌 Décision : {prediction}")
     else:
-        st.subheader("Résultat de l'analyse")
+        st.error(f"📌 Décision : {prediction}")
 
-        # Affichage du score de défaut (en pourcentage)
-        proba = data.get("proba_default", None)
-        if proba is not None:
-            score_percent = round(proba * 100, 2)
-            st.metric(label="Probabilité de défaut", value=f"{score_percent} %")
+    fig = px.bar_polar(
+        r=[score, 100 - score],
+        theta=["Score", "Distance au seuil"],
+        color=["Score", "Distance au seuil"],
+        color_discrete_sequence=px.colors.sequential.Plasma_r,
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-            # Jauge
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=score_percent,
-                gauge={
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "red" if score_percent > 50 else "green"},
-                    'steps': [
-                        {'range': [0, 50], 'color': 'rgba(0,255,0,0.2)'},
-                        {'range': [50, 100], 'color': 'rgba(255,0,0,0.2)'}
-                    ]
-                },
-                title={'text': "Score de risque (%)"}
-            ))
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("Aucune probabilité de défaut trouvée.")
+with col2:
+    st.markdown("#### 🔍 Caractéristiques principales du client")
+    df_info = pd.DataFrame(data.items(), columns=["Variable", "Valeur"])
+    st.dataframe(df_info, use_container_width=True)
 
-        # Affichage des caractéristiques client
-        st.subheader("Caractéristiques du client")
-        features = data["client_features"]
-        df_client = pd.DataFrame.from_dict(features, orient="index", columns=["Valeur"])
-        st.dataframe(df_client)
+# === Comparaison avec la population ===
+st.markdown("### 📈 Comparaison avec la population")
 
+numeric_cols = df_all_clients.select_dtypes(include="number").columns.tolist()
+selected_var = st.selectbox("Variable à comparer", numeric_cols)
 
+fig = px.histogram(
+    df_all_clients,
+    x=selected_var,
+    nbins=30,
+    title=f"Distribution de {selected_var} dans la population",
+    color_discrete_sequence=["#636EFA"],
+)
 
+if selected_var in data:
+    fig.add_vline(
+        x=data[selected_var],
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Client",
+    )
+st.plotly_chart(fig, use_container_width=True)
+
+# === Fin ===
+st.markdown("---")
+st.caption("Prototype V1 - API connectée, score et comparaison de données")
