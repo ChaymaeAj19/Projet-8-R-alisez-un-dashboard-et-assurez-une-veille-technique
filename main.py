@@ -2,155 +2,137 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
-import joblib
 import shap
+import joblib
+import os
 import matplotlib.pyplot as plt
-import io
-import base64
 
-# --- Config page ---
+# === Configuration de la page ===
 st.set_page_config(page_title="Dashboard Scoring Crédit", layout="wide")
-st.title("📊 Dashboard Scoring Crédit - Prototype avec SHAP local")
+st.title("📊 Dashboard - Scoring Crédit Client")
 
 API_URL = "https://projet-7-implementation.onrender.com"
 
-# --- Chargement données ---
+# === Chargement des données clients ===
 @st.cache_data
-def load_data():
-    return pd.read_csv("features_for_prediction.csv")
+def load_clients_data():
+    df = pd.read_csv("features_for_prediction.csv")
+    return df
 
-df = load_data()
+df_all_clients = load_clients_data()
 
-# --- Chargement modèle localement pour SHAP ---
-@st.cache_resource
-def load_model():
-    # Chemin local vers ton pipeline LGBM picklé
-    model_path = "Simulations/Best_model/lgbm_pipeline1.pkl"
-    model_bundle = joblib.load(model_path)
-    pipeline = model_bundle['pipeline']
-    expected_features = model_bundle['features']
-    model = pipeline.steps[-1][1]
-    explainer = shap.TreeExplainer(model)
-    return pipeline, expected_features, explainer
-
-pipeline, expected_features, explainer = load_model()
-
-numeric_cols = df.select_dtypes(include="number").columns.tolist()
-client_ids = df["SK_ID_CURR"].unique()
-
-# --- Sélection client ---
+# === Sélection d'un client ===
+client_ids = df_all_clients["SK_ID_CURR"].unique()
 client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
-client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 
-# --- Appel API pour récupérer score ---
-def predict_api(client_id):
+# === Données du client sélectionné ===
+data = df_all_clients[df_all_clients["SK_ID_CURR"] == client_id].iloc[0].to_dict()
+
+# === Requête à l'API pour le score ===
+def get_prediction(client_id):
     try:
-        response = requests.post(f"{API_URL}/predict", json={"SK_ID_CURR": int(client_id)})
+        response = requests.post(
+            f"{API_URL}/predict", json={"SK_ID_CURR": int(client_id)}
+        )
         return response.json()
-    except Exception as e:
-        return {"error": str(e)}
+    except:
+        return {"error": "Erreur de connexion à l'API"}
 
-res = predict_api(client_id)
-score = res.get("probability", None)
+result = get_prediction(client_id)
+
+# === Vérification de la réponse API ===
+score = result.get("probability", None)
 if score is None:
-    st.error("Erreur récupération score depuis API.")
+    st.error("❌ Erreur : le score n’a pas été reçu depuis l’API.")
+    st.write("Réponse de l'API :", result)
     st.stop()
 
-decision = "Accord" if score >= 50 else "Refus"
+prediction = "Accord" if score >= 50 else "Refus"
 
-# --- Affichage score & jauge ---
+# === Affichage du score ===
+st.subheader(f"Client ID : {client_id}")
 col1, col2 = st.columns([1, 2])
-with col1:
-    st.metric("Score crédit (%)", f"{score:.2f}%")
-    if decision == "Accord":
-        st.success(f"Décision : {decision}")
-    else:
-        st.error(f"Décision : {decision}")
 
-    # Jauge Plotly
-    fig_gauge = px.bar_polar(
+with col1:
+    st.metric("Score de crédit (%)", f"{round(score, 2)}%")
+    if prediction == "Accord":
+        st.success(f"📌 Décision : {prediction}")
+    else:
+        st.error(f"📌 Décision : {prediction}")
+
+    fig = px.bar_polar(
         r=[score, 100 - score],
         theta=["Score", "Distance au seuil"],
         color=["Score", "Distance au seuil"],
         color_discrete_sequence=px.colors.sequential.Plasma_r,
-        title="Score crédit"
     )
-    st.plotly_chart(fig_gauge, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-    st.markdown("### Caractéristiques du client")
-    st.dataframe(client_data[expected_features])
+    st.markdown("#### 🔍 Caractéristiques principales du client")
+    df_info = pd.DataFrame(data.items(), columns=["Variable", "Valeur"])
+    st.dataframe(df_info, use_container_width=True)
 
-# --- Calcul SHAP local ---
-st.markdown("---")
-st.markdown("## Explication du score par SHAP (local)")
+# === Comparaison avec la population ===
+st.markdown("### 📈 Comparaison avec la population")
 
-# Préparer input modèle (attention à la colonne SK_ID_CURR souvent exclue)
-X_client = client_data[expected_features].to_frame().T
-X_client = X_client.apply(pd.to_numeric, errors='coerce').fillna(0)
+numeric_cols = df_all_clients.select_dtypes(include="number").columns.tolist()
+selected_var = st.selectbox("Variable à comparer", numeric_cols)
 
-shap_values = explainer.shap_values(X_client)[1]  # classe 1 (risque)
+fig = px.histogram(
+    df_all_clients,
+    x=selected_var,
+    nbins=30,
+    title=f"Distribution de {selected_var} dans la population",
+    color_discrete_sequence=["#636EFA"],
+)
 
-# Affichage graphique SHAP waterfall local avec matplotlib et Streamlit
-fig, ax = plt.subplots(figsize=(10, 6))
-shap.waterfall_plot(shap.Explanation(values=shap_values[0],
-                                    base_values=explainer.expected_value[1],
-                                    data=X_client.iloc[0],
-                                    feature_names=expected_features), max_display=10)
-st.pyplot(fig)
+if selected_var in data:
+    fig.add_vline(
+        x=data[selected_var],
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Client",
+    )
+st.plotly_chart(fig, use_container_width=True)
 
-# --- Comparaison univariée ---
-st.markdown("---")
-st.markdown("## Comparaison univariée avec la population")
+# === SHAP local et global (hors API) ===
+st.markdown("### 🔍 Explication du modèle avec SHAP")
 
-var_uni = st.selectbox("Variable à comparer", numeric_cols, key="uni_var")
-
-fig_uni = px.histogram(df, x=var_uni, nbins=30, title=f"Distribution de {var_uni}")
-fig_uni.add_vline(x=client_data[var_uni], line_dash="dash", line_color="red", annotation_text="Client")
-st.plotly_chart(fig_uni, use_container_width=True)
-
-# --- Analyse bivariée ---
-st.markdown("---")
-st.markdown("## Analyse bivariée")
-
-var_x = st.selectbox("Feature X", numeric_cols, index=0, key="bi_var_x")
-var_y = st.selectbox("Feature Y", numeric_cols, index=1, key="bi_var_y")
-
-fig_bi = px.scatter(df, x=var_x, y=var_y, opacity=0.5,
-                    title=f"Analyse bivariée : {var_x} vs {var_y}")
-fig_bi.add_scatter(x=[client_data[var_x]], y=[client_data[var_y]], mode='markers',
-                   marker=dict(color='red', size=15), name="Client")
-st.plotly_chart(fig_bi, use_container_width=True)
-
-# --- Modification client et recalcul ---
-st.markdown("---")
-st.markdown("## Modifier les informations du client")
-
-with st.form("edit_form"):
-    edited_features = {}
-    for feat in expected_features:
-        val = st.number_input(feat, value=float(client_data[feat]), format="%.4f")
-        edited_features[feat] = val
-    submit_edit = st.form_submit_button("Recalculer score")
-
-if submit_edit:
-    # On peut modifier la fonction API pour accepter dict complet de features
+# Chemins locaux
+model_path = os.path.join("Simulations", "Best_model", "lgbm_pipeline1.pkl")
+if not os.path.exists(model_path):
+    st.warning("⚠️ Modèle non trouvé localement pour SHAP.")
+else:
     try:
-        response = requests.post(f"{API_URL}/predict", json={"data": edited_features})
-        res_edit = response.json()
+        model_bundle = joblib.load(model_path)
+        pipeline = model_bundle["pipeline"]
+        expected_features = model_bundle["features"]
+        model = pipeline.steps[-1][1]
+
+        booster = model.booster_ if hasattr(model, "booster_") else model
+        explainer = shap.Explainer(booster)
+
+        # Données client pour SHAP
+        X_client = df_all_clients[df_all_clients["SK_ID_CURR"] == client_id][expected_features].apply(pd.to_numeric, errors="coerce").fillna(0)
+        shap_values = explainer(X_client)
+
+        st.markdown("#### 📌 Explication locale (client)")
+        fig_local, ax = plt.subplots()
+        shap.plots.waterfall(shap_values[0], show=False)
+        st.pyplot(fig_local)
+
+        st.markdown("#### 🌍 Explication globale (top features)")
+        X_sample = df_all_clients[expected_features].sample(n=100, random_state=42).apply(pd.to_numeric, errors="coerce").fillna(0)
+        global_shap_vals = explainer(X_sample)
+
+        fig_global, ax2 = plt.subplots()
+        shap.summary_plot(global_shap_vals.values, X_sample, plot_type="bar", show=False)
+        st.pyplot(fig_global)
+
     except Exception as e:
-        res_edit = {"error": str(e)}
+        st.warning(f"⚠️ Erreur lors du calcul SHAP : {e}")
 
-    score_edit = res_edit.get("probability", None)
-    if score_edit is not None:
-        st.success(f"Score recalculé : {score_edit:.2f}%")
-        decision_edit = "Accord" if score_edit >= 50 else "Refus"
-        if decision_edit == "Accord":
-            st.success(f"Décision : {decision_edit}")
-        else:
-            st.error(f"Décision : {decision_edit}")
-    else:
-        st.error("Erreur lors de la prédiction du score modifié.")
-
+# === Fin ===
 st.markdown("---")
-st.caption("Prototype avec score, interprétabilité locale SHAP, comparaison, analyse et édition client.")
+st.caption("Prototype V1 - API pour score, SHAP local en local, comparaison client/population")
