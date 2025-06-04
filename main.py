@@ -24,7 +24,7 @@ client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
 # === Données du client sélectionné ===
 data = df_all_clients[df_all_clients["SK_ID_CURR"] == client_id].iloc[0].to_dict()
 
-# === Requête à l'API ===
+# === Requête à l'API pour un client existant ===
 def get_prediction(client_id):
     try:
         response = requests.post(
@@ -93,6 +93,67 @@ if selected_var in data:
     )
 st.plotly_chart(fig, use_container_width=True)
 
+# === Formulaire pour modifier les données client et recalculer ===
+st.markdown("### ✏️ Modifier les informations du client")
+
+with st.form("edit_client_form"):
+    edited_data = {}
+    for var in numeric_cols:
+        if var in data:
+            edited_data[var] = st.number_input(var, value=float(data[var]))
+    submit_edit = st.form_submit_button("Recalculer avec modifications")
+
+if submit_edit:
+    try:
+        response_edit = requests.post(f"{API_URL}/predict", json={"data": edited_data})
+        if response_edit.status_code == 200:
+            res_edit = response_edit.json()
+            score_edit = res_edit.get("probability")
+            if score_edit is not None:
+                st.success(f"Score recalculé : {score_edit:.2f}%")
+                decision_edit = "Accord" if score_edit >= 50 else "Refus"
+                if decision_edit == "Accord":
+                    st.success(f"📌 Décision : {decision_edit}")
+                else:
+                    st.error(f"📌 Décision : {decision_edit}")
+            else:
+                st.error("Erreur dans la réponse de l'API")
+        else:
+            st.error("Erreur de connexion à l'API pour la modification")
+    except Exception as e:
+        st.error(f"Erreur lors de la requête API : {e}")
+
+# === Upload d’un nouveau client ===
+st.markdown("### ➕ Ajouter un nouveau client (CSV)")
+
+uploaded_file = st.file_uploader("Importer un fichier CSV avec 1 client")
+
+if uploaded_file:
+    try:
+        new_client_df = pd.read_csv(uploaded_file)
+        missing_cols = set(numeric_cols) - set(new_client_df.columns)
+        if missing_cols:
+            st.error(f"Colonnes manquantes dans le fichier : {missing_cols}")
+        else:
+            new_client_data = new_client_df.iloc[0][numeric_cols].to_dict()
+            response_new = requests.post(f"{API_URL}/predict", json={"data": new_client_data})
+            if response_new.status_code == 200:
+                res_new = response_new.json()
+                score_new = res_new.get("probability")
+                if score_new is not None:
+                    st.success(f"Score du nouveau client : {score_new:.2f}%")
+                    decision_new = "Accord" if score_new >= 50 else "Refus"
+                    if decision_new == "Accord":
+                        st.success(f"📌 Décision : {decision_new}")
+                    else:
+                        st.error(f"📌 Décision : {decision_new}")
+                else:
+                    st.error("Erreur dans la réponse de l'API")
+            else:
+                st.error("Erreur de connexion à l'API pour le nouveau client")
+    except Exception as e:
+        st.error(f"Erreur lecture fichier : {e}")
+
 # === Fin ===
 st.markdown("---")
-st.caption("Prototype V1 - API connectée, score et comparaison de données")
+st.caption("Prototype V1 - API connectée, score et comparaison de données avec édition dynamique")
