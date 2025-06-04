@@ -41,7 +41,6 @@ if client_id:
         else:
             st.warning("Aucune probabilité de défaut trouvée.")
 
-
         # Affichage des caractéristiques client
         st.subheader("Caractéristiques du client")
         features = data["client_features"]
