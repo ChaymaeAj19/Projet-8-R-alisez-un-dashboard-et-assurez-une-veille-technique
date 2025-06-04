@@ -11,7 +11,7 @@ st.set_page_config(page_title="Dashboard Scoring Crédit", layout="wide")
 
 # === Chargement du modèle et des données ===
 model_path = os.path.join("Simulations", "Best_model", "lgbm_pipeline1.pkl")
-data_path = os.path.join("Simulations", "Data", "features_for_prediction.csv")
+data_path = os.path.join("features_for_prediction.csv")
 
 @st.cache_resource
 def load_model():
