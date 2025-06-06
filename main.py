@@ -1,143 +1,168 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import requests
-import shap
-import joblib
-import matplotlib.pyplot as plt
+import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+import joblib
+import shap
+import matplotlib.pyplot as plt
 import os
 
-# === CONFIG ===
-st.set_page_config(layout="wide")
+# --- Configuration ---
+st.set_page_config(page_title="Dashboard Scoring Crédit", layout="wide")
+st.title("📊 Dashboard Scoring Crédit - Prototype")
+
 API_URL = "https://projet-7-implementation.onrender.com"
-MODEL_PATH = "Simulations/Best_model/lgbm_pipeline1.pkl"
-DATA_PATH = "Simulations/Data/features_for_prediction.csv"
 
-# === CHARGEMENT MODELE ET DONNEES ===
-@st.cache_resource
-def load_model_and_data():
-    model_bundle = joblib.load(MODEL_PATH)
-    pipeline = model_bundle["pipeline"]
-    features = model_bundle["features"]
-    df = pd.read_csv(DATA_PATH)
-    return pipeline, features, df
-
-pipeline, expected_features, df_all_clients = load_model_and_data()
-model = pipeline.steps[-1][1]
-explainer = shap.TreeExplainer(model)
-
-# === SIDEBAR: Sélection ou ajout client ===
-st.sidebar.header("🔎 Client")
-client_ids = df_all_clients["SK_ID_CURR"].tolist()
-selected_id = st.sidebar.selectbox("Sélectionnez un client", client_ids)
-new_client = st.sidebar.checkbox("➕ Ajouter un nouveau client")
-
-# === NOUVEAU CLIENT ===
-if new_client:
-    st.title("📋 Nouveau client")
-    new_data = {}
-    for col in expected_features:
-        val = st.number_input(f"{col}", value=float(df_all_clients[col].mean()))
-        new_data[col] = val
-    if st.button("💾 Enregistrer et prédire"):
-        df_temp = pd.DataFrame([new_data])
-        proba = pipeline.predict_proba(df_temp)[0][1]
-        shap_values = explainer.shap_values(df_temp)
-        st.success(f"Score de crédit : {proba:.2%}")
-        fig, ax = plt.subplots()
-        shap.plots.waterfall(shap.Explanation(
-            values=shap_values[1][0],
-            base_values=explainer.expected_value[1],
-            data=df_temp.iloc[0],
-            feature_names=df_temp.columns
-        ), show=False)
-        st.pyplot(fig)
+# --- Chargement données ---
+@st.cache_data
+def load_data():
+    data_path = os.path.join("Simulations", "Data", "features_for_prediction.csv")
+    if not os.path.exists(data_path):
+        st.error(f"Le fichier {data_path} est introuvable.")
         st.stop()
+    df = pd.read_csv(data_path)
+    return df
 
-# === CLIENT EXISTANT ===
-client_data = df_all_clients[df_all_clients["SK_ID_CURR"] == selected_id]
-X_client = client_data[expected_features].copy().apply(pd.to_numeric, errors='coerce').fillna(0)
+df = load_data()
+numeric_cols = df.select_dtypes(include="number").columns.tolist()
+client_ids = df["SK_ID_CURR"].unique()
 
-# === API CALL ===
-@st.cache_data(show_spinner=False)
-def get_api_prediction(client_id):
+# --- Sélection client ---
+client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
+client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
+
+# --- Fonction API prédiction ---
+def predict_api(data_dict):
     try:
-        response = requests.post(f"{API_URL}/predict", json={"SK_ID_CURR": int(client_id)})
+        if "SK_ID_CURR" in data_dict:
+            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
+        else:
+            payload = {"data": data_dict}
+        response = requests.post(f"{API_URL}/predict", json=payload)
         return response.json()
-    except:
-        return {"error": "Erreur de connexion à l'API"}
+    except Exception as e:
+        return {"error": str(e)}
 
-result = get_api_prediction(selected_id)
-score = result.get("probability")
+# --- Affichage score & jauge ---
+res = predict_api({"SK_ID_CURR": client_id})
+score = res.get("probability", None)
+if score is None:
+    st.error("Erreur récupération score depuis l'API.")
+    st.stop()
 
-# === AFFICHAGE SCORE ===
-st.title(f"📊 Scoring Client : {selected_id}")
+decision = "Accord" if score >= 50 else "Refus"
+
 col1, col2 = st.columns([1, 2])
-
 with col1:
-    if score is not None:
-        st.metric("Score de crédit (%)", f"{round(score, 2)}%")
-        st.success("✅ Accord") if score >= 50 else st.error("❌ Refus")
-        fig = px.bar_polar(
-            r=[score, 100 - score],
-            theta=["Score", "Distance au seuil"],
-            color=["Score", "Distance au seuil"],
-            color_discrete_sequence=px.colors.sequential.Plasma_r
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    st.metric("Score crédit (%)", f"{score:.2f}%")
+    if decision == "Accord":
+        st.success(f"Décision : {decision}")
     else:
-        st.error("Erreur lors de la récupération du score.")
-        st.write(result)
+        st.error(f"Décision : {decision}")
+
+    gauge = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        gauge={
+            'axis': {'range': [0, 100]},
+            'bar': {'color': "green" if score >= 50 else "red"},
+            'steps': [
+                {'range': [0, 50], 'color': 'red'},
+                {'range': [50, 100], 'color': 'green'}
+            ],
+            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 50}
+        }
+    ))
+    st.plotly_chart(gauge, use_container_width=True)
 
 with col2:
-    st.markdown("#### 📄 Caractéristiques client")
-    editable_client = st.data_editor(client_data, num_rows="fixed")
-    if st.button("Mettre à jour client"):
-        st.info("⚠️ Sauvegarde locale non implémentée — à ajouter si besoin.")
+    st.markdown("### Caractéristiques du client")
+    st.dataframe(client_data[numeric_cols])
 
-# === SHAP LOCAL ===
-st.subheader("📌 Explication locale (SHAP)")
-shap_values = explainer.shap_values(X_client)
-explanation = shap.Explanation(
-    values=shap_values[1][0],
-    base_values=explainer.expected_value[1],
-    data=X_client.iloc[0],
-    feature_names=X_client.columns
-)
+# --- SHAP local & global (réels) ---
+st.markdown("---")
+st.markdown("## Interprétabilité (Feature importance)")
+
+@st.cache_resource
+def load_model():
+    model_path = os.path.join("Simulations", "Best_model", "lgbm_pipeline1.pkl")
+    if not os.path.exists(model_path):
+        st.error("Fichier modèle introuvable.")
+        st.stop()
+    model_bundle = joblib.load(model_path)
+    return model_bundle
+
+model_bundle = load_model()
+pipeline = model_bundle["pipeline"]
+expected_features = model_bundle["features"]
+model = pipeline.steps[-1][1]
+
+X_all = df[expected_features].copy().apply(pd.to_numeric, errors='coerce').fillna(0)
+X_client = df[df["SK_ID_CURR"] == client_id][expected_features].copy().apply(pd.to_numeric, errors='coerce').fillna(0)
+
+booster = model.booster_ if hasattr(model, "booster_") else model
+explainer = shap.TreeExplainer(booster)
+
+st.markdown("### 🔍 Importance locale SHAP (réelle)")
+explanation = explainer(X_client)
 fig_local, ax = plt.subplots()
-shap.plots.waterfall(explanation, show=False)
+shap.plots.waterfall(explanation[0], show=False)
 st.pyplot(fig_local)
 
-# === SHAP GLOBAL ===
-st.subheader("🌍 SHAP global : Variables les + importantes")
-X_all = df_all_clients[expected_features].copy().apply(pd.to_numeric, errors='coerce').fillna(0)
+st.markdown("### 🌍 Importance globale SHAP (réelle)")
 shap_vals_global = explainer.shap_values(X_all)
+shap_vals_global_use = shap_vals_global[1] if isinstance(shap_vals_global, list) else shap_vals_global
 fig_global, ax = plt.subplots()
-shap.summary_plot(shap_vals_global[1], X_all, plot_type="bar", show=False)
+shap.summary_plot(shap_vals_global_use, X_all, plot_type="bar", show=False, max_display=10)
 st.pyplot(fig_global)
 
-# === ANALYSE UNIVARIEE ===
-st.subheader("📈 Comparaison du client avec la population")
-selected_var = st.selectbox("Variable à comparer", expected_features)
-fig_uni = px.histogram(df_all_clients, x=selected_var, nbins=30)
-fig_uni.add_vline(x=client_data[selected_var].values[0], line_color="red", annotation_text="Client", line_dash="dash")
+# --- Histogramme univarié ---
+st.markdown("---")
+st.markdown("## Comparaison univariée")
+
+var_uni = st.selectbox("Variable à comparer", numeric_cols)
+
+fig_uni = px.histogram(df, x=var_uni, nbins=30, title=f"Distribution de {var_uni}")
+fig_uni.add_vline(x=client_data[var_uni], line_dash="dash", line_color="red", annotation_text="Client")
 st.plotly_chart(fig_uni, use_container_width=True)
 
-# === ANALYSE BI-VARIEE ===
-st.subheader("📊 Analyse bi-variée")
-col_x, col_y = st.columns(2)
-feature_x = col_x.selectbox("Variable X", expected_features)
-feature_y = col_y.selectbox("Variable Y", expected_features)
+# --- Analyse bi-variée ---
+st.markdown("---")
+st.markdown("## Analyse bivariée")
 
-fig_bi = px.scatter(df_all_clients, x=feature_x, y=feature_y, opacity=0.5)
-fig_bi.add_scatter(x=[client_data[feature_x].values[0]],
-                   y=[client_data[feature_y].values[0]],
-                   mode='markers',
-                   marker=dict(size=12, color='red'),
-                   name="Client")
+var_x = st.selectbox("Feature X", numeric_cols, index=0, key="var_x")
+var_y = st.selectbox("Feature Y", numeric_cols, index=1, key="var_y")
+
+fig_bi = px.scatter(df, x=var_x, y=var_y, title=f"Analyse bivariée : {var_x} vs {var_y}", opacity=0.5)
+fig_bi.add_scatter(x=[client_data[var_x]], y=[client_data[var_y]], mode='markers',
+                   marker=dict(color='red', size=15), name="Client")
 st.plotly_chart(fig_bi, use_container_width=True)
 
-# === FIN ===
+# --- Formulaire modification client + recalcul dynamique ---
 st.markdown("---")
-st.caption("Prototype P7 - Dashboard Scoring Crédit | API + SHAP local")
+st.markdown("## Modifier les informations du client")
+
+with st.form("edit_form"):
+    edited_features = {}
+    for feat in numeric_cols:
+        val = st.number_input(feat, value=float(client_data[feat]), format="%.4f")
+        edited_features[feat] = val
+    submit_edit = st.form_submit_button("Recalculer score")
+
+if submit_edit:
+    res_edit = predict_api(edited_features)
+    score_edit = res_edit.get("probability", None)
+    if score_edit is not None:
+        st.success(f"Score recalculé : {score_edit:.2f}%")
+        decision_edit = "Accord" if score_edit >= 50 else "Refus"
+        if decision_edit == "Accord":
+            st.success(f"Décision : {decision_edit}")
+        else:
+            st.error(f"Décision : {decision_edit}")
+    else:
+        st.error("Erreur lors de la prédiction du score modifié.")
+
+# --- Fin ---
+st.markdown("---")
+st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP réelle, comparaisons et édition client.")
