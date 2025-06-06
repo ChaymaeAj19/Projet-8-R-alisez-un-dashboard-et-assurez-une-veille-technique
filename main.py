@@ -51,7 +51,8 @@ if score is None:
     st.error("Erreur récupération score depuis l'API.")
     st.stop()
 
-decision = "Accord" if score >= 50 else "Refus"
+# Seuil ajusté à 5%
+decision = "Accord" if score < 5 else "Refus"
 
 col1, col2 = st.columns([1, 2])
 with col1:
@@ -66,12 +67,12 @@ with col1:
         value=score,
         gauge={
             'axis': {'range': [0, 100]},
-            'bar': {'color': "green" if score >= 50 else "red"},
+            'bar': {'color': "green" if score < 5 else "red"},
             'steps': [
-                {'range': [0, 50], 'color': 'red'},
-                {'range': [50, 100], 'color': 'green'}
+                {'range': [0, 5], 'color': 'green'},
+                {'range': [5, 100], 'color': 'red'}
             ],
-            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 50}
+            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 5}
         }
     ))
     st.plotly_chart(gauge, use_container_width=True)
@@ -155,7 +156,7 @@ if submit_edit:
     score_edit = res_edit.get("probability", None)
     if score_edit is not None:
         st.success(f"Score recalculé : {score_edit:.2f}%")
-        decision_edit = "Accord" if score_edit >= 50 else "Refus"
+        decision_edit = "Accord" if score_edit < 5 else "Refus"
         if decision_edit == "Accord":
             st.success(f"Décision : {decision_edit}")
         else:
