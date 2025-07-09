@@ -4,3 +4,5 @@ requests
 plotly
 shap
 scikit-learn
+matplotlib
+
