@@ -3,6 +3,6 @@ pandas
 requests
 plotly
 shap
-scikit-learn
 matplotlib
-
+scikit-learn==1.4.2
+xgboost==2.0.3
