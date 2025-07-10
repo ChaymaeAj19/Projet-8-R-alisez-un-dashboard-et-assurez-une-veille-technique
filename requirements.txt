@@ -1,9 +1,8 @@
-requests
-plotly
-shap
 streamlit==1.35.0
 pandas==2.2.2
-numpy>=1.24,<2.0
-scikit-learn==1.4.2
-matplotlib==3.8.4
+plotly==6.2.0
+requests==2.32.4
+shap==0.48.0
 joblib==1.4.2
+matplotlib==3.8.4
+lightgbm==4.3.0
