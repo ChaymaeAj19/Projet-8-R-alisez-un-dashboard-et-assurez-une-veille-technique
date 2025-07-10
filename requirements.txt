@@ -1,10 +1,10 @@
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.4.2
 requests
 plotly
 shap
 streamlit==1.35.0
-pandas==2.2.2
-scikit-learn==1.4.2
-numpy==1.26.4
 scipy==1.13.1
 cython>=3.0.8
 setuptools>=67.0.0
