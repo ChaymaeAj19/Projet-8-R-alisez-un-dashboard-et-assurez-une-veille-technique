@@ -39,10 +39,14 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 # --- Fonction API prédiction ---
 def predict_api(data_dict):
     try:
-        if "SK_ID_CURR" in data_dict and len(data_dict) == 1:
-            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
+        # data_dict doit contenir SK_ID_CURR et facultativement data (liste d'un dict)
+        if "data" in data_dict:
+            payload = {
+                "SK_ID_CURR": int(data_dict["SK_ID_CURR"]),
+                "data": [ {k: float(v) for k,v in data_dict["data"][0].items()} ]
+            }
         else:
-            payload = {"data": [data_dict]}  # 🟢 Liste d'un dictionnaire
+            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
         response = requests.post(f"{API_URL}/predict", json=payload)
         return response.json()
     except Exception as e:
@@ -156,7 +160,12 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    res_edit = predict_api(edited_features)
+    # Envoyer SK_ID_CURR + data avec les modifs à l'API
+    data_to_send = {
+        "SK_ID_CURR": client_id,
+        "data": [edited_features]  # liste contenant un dict
+    }
+    res_edit = predict_api(data_to_send)
     score_edit = res_edit.get("probability", None)
     if score_edit is not None:
         st.success(f"Score recalculé : {score_edit:.2f}%")
@@ -166,8 +175,7 @@ if submit_edit:
         else:
             st.error(f"Décision : {decision_edit}")
     else:
-        error_msg = res_edit.get("error", "Erreur inconnue.")
-        st.error(f"Erreur lors de la prédiction : {error_msg}")
+        st.error("Erreur lors de la prédiction du score modifié.")
 
 # --- Fin ---
 st.markdown("---")
