@@ -39,20 +39,23 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 # --- Fonction API prédiction ---
 def predict_api(data_dict):
     try:
-        response = requests.post(f"{API_URL}/predict", json=data_dict)
-        st.write("📤 Payload envoyé :", data_dict)
-        st.write("📥 Réponse brute :", response.json())
+        if "SK_ID_CURR" in data_dict:
+            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
+        else:
+            payload = {"data": data_dict}
+        response = requests.post(f"{API_URL}/predict", json=payload)
         return response.json()
     except Exception as e:
         return {"error": str(e)}
 
 # --- Affichage score & jauge ---
-res = predict_api({"SK_ID_CURR": int(client_id)})
+res = predict_api({"SK_ID_CURR": client_id})
 score = res.get("probability", None)
 if score is None:
     st.error("Erreur récupération score depuis l'API.")
     st.stop()
 
+# Seuil ajusté à 50%
 decision = "Accord" if score < 50 else "Refus"
 
 col1, col2 = st.columns([1, 2])
@@ -82,7 +85,7 @@ with col2:
     st.markdown("### Caractéristiques du client")
     st.dataframe(client_data[numeric_cols])
 
-# --- SHAP local & global ---
+# --- SHAP local & global (réels) ---
 st.markdown("---")
 st.markdown("## Interprétabilité (Feature importance)")
 
@@ -106,13 +109,13 @@ X_client = df[df["SK_ID_CURR"] == client_id][expected_features].copy().apply(pd.
 booster = model.booster_ if hasattr(model, "booster_") else model
 explainer = shap.TreeExplainer(booster)
 
-st.markdown("### 🔍 Importance locale SHAP")
+st.markdown("### 🔍 Importance locale SHAP (réelle)")
 explanation = explainer(X_client)
 fig_local, ax = plt.subplots()
 shap.plots.waterfall(explanation[0], show=False)
 st.pyplot(fig_local)
 
-st.markdown("### 🌍 Importance globale SHAP")
+st.markdown("### 🌍 Importance globale SHAP (réelle)")
 shap_vals_global = explainer.shap_values(X_all)
 shap_vals_global_use = shap_vals_global[1] if isinstance(shap_vals_global, list) else shap_vals_global
 fig_global, ax = plt.subplots()
@@ -153,16 +156,8 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    # On envoie les données modifiées via la clé "data"
-    payload = {
-        "SK_ID_CURR": int(client_id),
-        "data": [edited_features],
-        "with_shap": True
-    }
-
-    res_edit = predict_api(payload)
+    res_edit = predict_api(edited_features)
     score_edit = res_edit.get("probability", None)
-
     if score_edit is not None:
         st.success(f"Score recalculé : {score_edit:.2f}%")
         decision_edit = "Accord" if score_edit < 50 else "Refus"
@@ -170,15 +165,9 @@ if submit_edit:
             st.success(f"Décision : {decision_edit}")
         else:
             st.error(f"Décision : {decision_edit}")
-        
-        # Affiche aussi le plot SHAP si dispo
-        shap_img_base64 = res_edit.get("shap_plot_base64", None)
-        if shap_img_base64:
-            st.image(f"data:image/png;base64,{shap_img_base64}", caption="Interprétabilité locale SHAP")
-
     else:
         st.error("Erreur lors de la prédiction du score modifié.")
 
 # --- Fin ---
 st.markdown("---")
-st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP, comparaisons et édition client.")
+st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP réelle, comparaisons et édition client.")
