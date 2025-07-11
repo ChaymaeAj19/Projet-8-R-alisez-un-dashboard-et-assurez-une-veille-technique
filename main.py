@@ -39,17 +39,15 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 # --- Fonction API prédiction ---
 def predict_api(data_dict):
     try:
-        if "SK_ID_CURR" in data_dict:
-            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"]), "data": [data_dict]}
-        else:
-            payload = {"data": [data_dict]}
-        response = requests.post(f"{API_URL}/predict", json=payload)
+        response = requests.post(f"{API_URL}/predict", json=data_dict)
+        st.write("📤 Payload envoyé :", data_dict)
+        st.write("📥 Réponse brute :", response.json())
         return response.json()
     except Exception as e:
         return {"error": str(e)}
 
 # --- Affichage score & jauge ---
-res = predict_api({"SK_ID_CURR": client_id})
+res = predict_api({"SK_ID_CURR": int(client_id)})
 score = res.get("probability", None)
 if score is None:
     st.error("Erreur récupération score depuis l'API.")
@@ -108,13 +106,13 @@ X_client = df[df["SK_ID_CURR"] == client_id][expected_features].copy().apply(pd.
 booster = model.booster_ if hasattr(model, "booster_") else model
 explainer = shap.TreeExplainer(booster)
 
-st.markdown("### 🔍 Importance locale SHAP (réelle)")
+st.markdown("### 🔍 Importance locale SHAP")
 explanation = explainer(X_client)
 fig_local, ax = plt.subplots()
 shap.plots.waterfall(explanation[0], show=False)
 st.pyplot(fig_local)
 
-st.markdown("### 🌍 Importance globale SHAP (réelle)")
+st.markdown("### 🌍 Importance globale SHAP")
 shap_vals_global = explainer.shap_values(X_all)
 shap_vals_global_use = shap_vals_global[1] if isinstance(shap_vals_global, list) else shap_vals_global
 fig_global, ax = plt.subplots()
@@ -126,11 +124,12 @@ st.markdown("---")
 st.markdown("## Comparaison univariée")
 
 var_uni = st.selectbox("Variable à comparer", numeric_cols)
+
 fig_uni = px.histogram(df, x=var_uni, nbins=30, title=f"Distribution de {var_uni}")
 fig_uni.add_vline(x=client_data[var_uni], line_dash="dash", line_color="red", annotation_text="Client")
 st.plotly_chart(fig_uni, use_container_width=True)
 
-# --- Analyse bivariée ---
+# --- Analyse bi-variée ---
 st.markdown("---")
 st.markdown("## Analyse bivariée")
 
@@ -154,8 +153,14 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    edited_features["SK_ID_CURR"] = int(client_id)  # ✅ Correction ici
-    res_edit = predict_api(edited_features)
+    # Ajout du SK_ID_CURR dans les features modifiées
+    edited_features["SK_ID_CURR"] = int(client_id)
+    payload = {
+        "SK_ID_CURR": int(client_id),
+        "data": [edited_features]
+    }
+
+    res_edit = predict_api(payload)
     score_edit = res_edit.get("probability", None)
 
     if score_edit is not None:
@@ -170,4 +175,4 @@ if submit_edit:
 
 # --- Fin ---
 st.markdown("---")
-st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP réelle, comparaisons et édition client.")
+st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP, comparaisons et édition client.")
