@@ -39,7 +39,10 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 # --- Fonction API prédiction ---
 def predict_api(data_dict):
     try:
-        payload = {"data": [data_dict]} if "NAME_CONTRACT_TYPE" in data_dict else {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
+        if "SK_ID_CURR" in data_dict:
+            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"]), "data": [data_dict]}
+        else:
+            payload = {"data": [data_dict]}
         response = requests.post(f"{API_URL}/predict", json=payload)
         return response.json()
     except Exception as e:
@@ -81,7 +84,7 @@ with col2:
     st.markdown("### Caractéristiques du client")
     st.dataframe(client_data[numeric_cols])
 
-# --- SHAP local & global (réels) ---
+# --- SHAP local & global ---
 st.markdown("---")
 st.markdown("## Interprétabilité (Feature importance)")
 
@@ -127,7 +130,7 @@ fig_uni = px.histogram(df, x=var_uni, nbins=30, title=f"Distribution de {var_uni
 fig_uni.add_vline(x=client_data[var_uni], line_dash="dash", line_color="red", annotation_text="Client")
 st.plotly_chart(fig_uni, use_container_width=True)
 
-# --- Analyse bi-variée ---
+# --- Analyse bivariée ---
 st.markdown("---")
 st.markdown("## Analyse bivariée")
 
@@ -151,8 +154,10 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
+    edited_features["SK_ID_CURR"] = int(client_id)  # ✅ Correction ici
     res_edit = predict_api(edited_features)
     score_edit = res_edit.get("probability", None)
+
     if score_edit is not None:
         st.success(f"Score recalculé : {score_edit:.2f}%")
         decision_edit = "Accord" if score_edit < 50 else "Refus"
@@ -163,5 +168,6 @@ if submit_edit:
     else:
         st.error("Erreur lors de la prédiction du score modifié.")
 
+# --- Fin ---
 st.markdown("---")
 st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP réelle, comparaisons et édition client.")
