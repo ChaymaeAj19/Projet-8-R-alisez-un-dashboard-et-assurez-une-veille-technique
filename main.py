@@ -32,23 +32,6 @@ df = load_data()
 numeric_cols = df.select_dtypes(include="number").columns.tolist()
 client_ids = df["SK_ID_CURR"].unique()
 
-# Liste variables catégorielles (à adapter selon ton jeu de données)
-categorical_cols = [
-    "CODE_GENDER",
-    "NAME_TYPE_SUITE",
-    "NAME_INCOME_TYPE",
-    "NAME_EDUCATION_TYPE",
-    "NAME_FAMILY_STATUS",
-    "NAME_HOUSING_TYPE",
-    "OCCUPATION_TYPE",
-    "WEEKDAY_APPR_PROCESS_START",
-    "ORGANIZATION_TYPE",
-    "FONDKAPREMONT_MODE",
-    "HOUSETYPE_MODE",
-    "WALLSMATERIAL_MODE",
-    "EMERGENCYSTATE_MODE",
-]
-
 # --- Sélection client ---
 client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
 client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
@@ -97,7 +80,7 @@ with col1:
 
 with col2:
     st.markdown("### Caractéristiques du client")
-    st.dataframe(client_data)
+    st.dataframe(client_data[numeric_cols])
 
 # --- SHAP local & global ---
 st.markdown("---")
@@ -164,28 +147,17 @@ st.markdown("## Modifier les informations du client")
 
 with st.form("edit_form"):
     edited_features = {}
-
-    # Variables catégorielles
-    for cat_col in categorical_cols:
-        options = df[cat_col].dropna().unique().tolist()
-        current_val = client_data[cat_col]
-        val = st.selectbox(cat_col, options, index=options.index(current_val) if current_val in options else 0)
-        edited_features[cat_col] = val
-
-    # Variables numériques (hors SK_ID_CURR)
-    numeric_cols_edit = [col for col in numeric_cols if col != "SK_ID_CURR"]
-    for num_col in numeric_cols_edit:
-        val = st.number_input(num_col, value=float(client_data[num_col]), format="%.4f")
-        edited_features[num_col] = val
-
+    for feat in numeric_cols:
+        val = st.number_input(feat, value=float(client_data[feat]), format="%.4f")
+        edited_features[feat] = val
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    edited_features["SK_ID_CURR"] = int(client_id)
-
+    # On envoie les données modifiées via la clé "data"
     payload = {
         "SK_ID_CURR": int(client_id),
-        "data": [edited_features]
+        "data": [edited_features],
+        "with_shap": True
     }
 
     res_edit = predict_api(payload)
@@ -198,6 +170,12 @@ if submit_edit:
             st.success(f"Décision : {decision_edit}")
         else:
             st.error(f"Décision : {decision_edit}")
+        
+        # Affiche aussi le plot SHAP si dispo
+        shap_img_base64 = res_edit.get("shap_plot_base64", None)
+        if shap_img_base64:
+            st.image(f"data:image/png;base64,{shap_img_base64}", caption="Interprétabilité locale SHAP")
+
     else:
         st.error("Erreur lors de la prédiction du score modifié.")
 
