@@ -40,11 +40,9 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 def predict_api(data_dict):
     try:
         if "SK_ID_CURR" in data_dict and len(data_dict) == 1:
-            # Cas normal : juste l'ID client
             payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
         else:
-            # Cas modifié : on envoie toutes les données modifiées
-            payload = {"data": data_dict}
+            payload = {"data": [data_dict]}  # 🟢 Liste d'un dictionnaire
         response = requests.post(f"{API_URL}/predict", json=payload)
         return response.json()
     except Exception as e:
@@ -168,7 +166,8 @@ if submit_edit:
         else:
             st.error(f"Décision : {decision_edit}")
     else:
-        st.error("Erreur lors de la prédiction du score modifié.")
+        error_msg = res_edit.get("error", "Erreur inconnue.")
+        st.error(f"Erreur lors de la prédiction : {error_msg}")
 
 # --- Fin ---
 st.markdown("---")
