@@ -39,19 +39,8 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 # --- Fonction API prédiction ---
 def predict_api(data_dict):
     try:
-        # Préparation payload
-        if "data" in data_dict:
-            # Format attendu : {"SK_ID_CURR": ..., "data": [{...}]}
-            payload = {
-                "SK_ID_CURR": int(data_dict["SK_ID_CURR"]),
-                "data": [ {k: float(v) for k,v in data_dict["data"][0].items()} ]
-            }
-        else:
-            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
+        payload = {"data": [data_dict]} if "NAME_CONTRACT_TYPE" in data_dict else {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
         response = requests.post(f"{API_URL}/predict", json=payload)
-        st.write("Payload envoyé :", payload)
-        st.write("Status code :", response.status_code)
-        st.write("Réponse brute :", response.text)
         return response.json()
     except Exception as e:
         return {"error": str(e)}
@@ -63,7 +52,6 @@ if score is None:
     st.error("Erreur récupération score depuis l'API.")
     st.stop()
 
-# Seuil ajusté à 50%
 decision = "Accord" if score < 50 else "Refus"
 
 col1, col2 = st.columns([1, 2])
@@ -135,7 +123,6 @@ st.markdown("---")
 st.markdown("## Comparaison univariée")
 
 var_uni = st.selectbox("Variable à comparer", numeric_cols)
-
 fig_uni = px.histogram(df, x=var_uni, nbins=30, title=f"Distribution de {var_uni}")
 fig_uni.add_vline(x=client_data[var_uni], line_dash="dash", line_color="red", annotation_text="Client")
 st.plotly_chart(fig_uni, use_container_width=True)
@@ -164,12 +151,7 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    # Préparer les données au format attendu par l'API
-    data_for_api = {
-        "SK_ID_CURR": int(client_id),
-        "data": [edited_features]
-    }
-    res_edit = predict_api(data_for_api)
+    res_edit = predict_api(edited_features)
     score_edit = res_edit.get("probability", None)
     if score_edit is not None:
         st.success(f"Score recalculé : {score_edit:.2f}%")
@@ -181,6 +163,5 @@ if submit_edit:
     else:
         st.error("Erreur lors de la prédiction du score modifié.")
 
-# --- Fin ---
 st.markdown("---")
 st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP réelle, comparaisons et édition client.")
