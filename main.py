@@ -39,9 +39,11 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 # --- Fonction API prédiction ---
 def predict_api(data_dict):
     try:
-        if "SK_ID_CURR" in data_dict:
+        if "SK_ID_CURR" in data_dict and len(data_dict) == 1:
+            # Cas normal : juste l'ID client
             payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
         else:
+            # Cas modifié : on envoie toutes les données modifiées
             payload = {"data": data_dict}
         response = requests.post(f"{API_URL}/predict", json=payload)
         return response.json()
