@@ -11,7 +11,6 @@ import joblib
 import shap
 import matplotlib.pyplot as plt
 import os
-import base64
 
 # --- Configuration ---
 st.set_page_config(page_title="Dashboard Scoring Crédit", layout="wide")
@@ -41,12 +40,10 @@ client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 def predict_api(data_dict):
     try:
         response = requests.post(f"{API_URL}/predict", json=data_dict)
-        response.raise_for_status()  # Vérifie que la requête est OK (200)
         st.write("📤 Payload envoyé :", data_dict)
         st.write("📥 Réponse brute :", response.json())
         return response.json()
     except Exception as e:
-        st.error(f"Erreur API : {e}")
         return {"error": str(e)}
 
 # --- Affichage score & jauge ---
@@ -156,13 +153,11 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    # On garde seulement les features attendues + SK_ID_CURR
-    features_to_send = {k: v for k, v in edited_features.items() if k in expected_features}
-    features_to_send["SK_ID_CURR"] = int(client_id)
-
+    # On envoie les données modifiées via la clé "data"
     payload = {
         "SK_ID_CURR": int(client_id),
-        "data": [features_to_send]
+        "data": [edited_features],
+        "with_shap": True
     }
 
     res_edit = predict_api(payload)
@@ -175,11 +170,12 @@ if submit_edit:
             st.success(f"Décision : {decision_edit}")
         else:
             st.error(f"Décision : {decision_edit}")
+        
+        # Affiche aussi le plot SHAP si dispo
+        shap_img_base64 = res_edit.get("shap_plot_base64", None)
+        if shap_img_base64:
+            st.image(f"data:image/png;base64,{shap_img_base64}", caption="Interprétabilité locale SHAP")
 
-        # Affichage du plot SHAP local retourné en base64 si présent
-        if "shap_plot_base64" in res_edit:
-            shap_img = res_edit["shap_plot_base64"]
-            st.image(shap_img, caption="SHAP local", use_column_width=True)
     else:
         st.error("Erreur lors de la prédiction du score modifié.")
 
