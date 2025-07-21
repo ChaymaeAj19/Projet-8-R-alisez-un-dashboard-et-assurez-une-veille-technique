@@ -147,10 +147,17 @@ st.markdown("## Modifier les informations du client")
 editable_df = pd.DataFrame(client_data[numeric_cols]).T.reset_index()
 editable_df.columns = ["Variable", "Valeur"]
 
-# Affichage tableau editable
+# --- Tableau éditable pour modification client ---
+st.markdown("## Modifier les informations du client")
+
+editable_df = pd.DataFrame({
+    "Variable": numeric_cols,
+    "Valeur": [client_data[col] for col in numeric_cols]
+})
+
 edited_df = st.data_editor(editable_df, num_rows="dynamic", use_container_width=True)
 
-# Convertir en dict pour prédiction
+# Appliquer les modifications
 data_for_pred = client_data.copy()
 for _, row in edited_df.iterrows():
     var = row["Variable"]
