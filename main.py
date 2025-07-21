@@ -1,164 +1,54 @@
 import streamlit as st
 import pandas as pd
-import requests
-import joblib
+import pickle
 import shap
 import matplotlib.pyplot as plt
-import plotly.express as px
-import plotly.graph_objects as go
-import os
+import numpy as np
 
-# --- Config page ---
-st.set_page_config(page_title="Dashboard Scoring Crédit", layout="wide")
-st.title("📊 Dashboard Scoring Crédit - Prototype")
+# === 1) CHARGEMENT DU MODÈLE ET DES DONNÉES ===
+model = pickle.load(open('mlflow_model/model.pkl', 'rb'))
+data = pd.read_csv('features_for_prediction.csv')
 
-API_URL = "https://projet-7-implementation.onrender.com"
-
-# --- Chargement données ---
-@st.cache_data
-def load_data():
-    data_path = os.path.join("Simulations", "Data", "features_for_prediction.csv")
-    if not os.path.exists(data_path):
-        st.error(f"Le fichier {data_path} est introuvable.")
-        st.stop()
-    df = pd.read_csv(data_path)
-    return df
-
-df = load_data()
-numeric_cols = df.select_dtypes(include="number").columns.tolist()
-client_ids = df["SK_ID_CURR"].unique()
-
-# --- Sélection client ---
-client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
-client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
-
-# --- Fonction API prédiction ---
-def predict_api(data_dict, use_id=True):
-    try:
-        if use_id and "SK_ID_CURR" in data_dict:
-            payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
-        else:
-            payload = {"data": data_dict}
-        response = requests.post(f"{API_URL}/predict", json=payload)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-# --- Affichage score & jauge ---
-res = predict_api({"SK_ID_CURR": client_id})
-score = res.get("probability", None)
-if score is None:
-    st.error("Erreur récupération score depuis l'API.")
+# Assure-toi que SK_ID_CURR est bien dans les données
+if 'SK_ID_CURR' not in data.columns:
+    st.error("La colonne 'SK_ID_CURR' est absente de features_for_prediction.csv")
     st.stop()
 
-decision = "Accord" if score < 50 else "Refus"
+# Liste des features pour la prédiction (sans SK_ID_CURR)
+expected_features = [col for col in data.columns if col != 'SK_ID_CURR']
 
-col1, col2 = st.columns([1, 2])
-with col1:
-    st.metric("Score crédit (%)", f"{score:.2f}%")
-    if decision == "Accord":
-        st.success(f"Décision : {decision}")
-    else:
-        st.error(f"Décision : {decision}")
+# === 2) SIDEBAR POUR CHOISIR LE CLIENT ===
+st.sidebar.header("🔍 Sélection du client")
+client_id = st.sidebar.selectbox("Choisissez un ID client:", data['SK_ID_CURR'])
 
-    gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=score,
-        gauge={
-            'axis': {'range': [0, 100]},
-            'bar': {'color': "green" if score < 50 else "red"},
-            'steps': [
-                {'range': [0, 50], 'color': 'green'},
-                {'range': [50, 100], 'color': 'red'}
-            ],
-            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 50}
-        }
-    ))
-    st.plotly_chart(gauge, use_container_width=True)
+# === 3) TITRE ET INTRODUCTION ===
+st.title("📊 Dashboard Crédit Accessible")
+st.write("Ce dashboard affiche la prédiction et l'explication SHAP pour un client donné.")
 
-with col2:
-    st.markdown("### Caractéristiques du client")
-    st.dataframe(client_data[numeric_cols])
+if client_id not in data['SK_ID_CURR'].values:
+    st.error("Client ID not found in the dataset.")
+    st.stop()
 
-# --- SHAP local & global ---
-st.markdown("---")
-st.markdown("## Interprétabilité (Feature importance)")
+# Récupérer les données du client sous forme de Series (index = variables)
+client_data = data.loc[data['SK_ID_CURR'] == client_id, expected_features].iloc[0]
 
-@st.cache_resource
-def load_model():
-    model_path = os.path.join("Simulations", "Best_model", "lgbm_pipeline1.pkl")
-    if not os.path.exists(model_path):
-        st.error("Fichier modèle introuvable.")
-        st.stop()
-    model_bundle = joblib.load(model_path)
-    return model_bundle
+st.subheader("Informations actuelles du client")
+st.write(client_data.to_frame(name='Valeur'))
 
-model_bundle = load_model()
-pipeline = model_bundle["pipeline"]
-expected_features = model_bundle["features"]
-model = pipeline.steps[-1][1]
+# === 4) FORMULAIRE ÉDITABLE (Data Editor) ===
 
-X_all = df[expected_features].copy().apply(pd.to_numeric, errors='coerce').fillna(0)
-X_client = df[df["SK_ID_CURR"] == client_id][expected_features].copy().apply(pd.to_numeric, errors='coerce').fillna(0)
-
-booster = model.booster_ if hasattr(model, "booster_") else model
-explainer = shap.TreeExplainer(booster)
-
-st.markdown("### 🔍 Importance locale SHAP (réelle)")
-explanation = explainer(X_client)
-fig_local, ax = plt.subplots()
-shap.plots.waterfall(explanation[0], show=False)
-st.pyplot(fig_local)
-
-st.markdown("### 🌍 Importance globale SHAP (réelle)")
-shap_vals_global = explainer.shap_values(X_all)
-shap_vals_global_use = shap_vals_global[1] if isinstance(shap_vals_global, list) else shap_vals_global
-fig_global, ax = plt.subplots()
-shap.summary_plot(shap_vals_global_use, X_all, plot_type="bar", show=False, max_display=10)
-st.pyplot(fig_global)
-
-# --- Histogramme univarié ---
-st.markdown("---")
-st.markdown("## Comparaison univariée")
-
-var_uni = st.selectbox("Variable à comparer", numeric_cols)
-
-fig_uni = px.histogram(df, x=var_uni, nbins=30, title=f"Distribution de {var_uni}")
-fig_uni.add_vline(x=client_data[var_uni], line_dash="dash", line_color="red", annotation_text="Client")
-st.plotly_chart(fig_uni, use_container_width=True)
-
-# --- Analyse bi-variée ---
-st.markdown("---")
-st.markdown("## Analyse bivariée")
-
-var_x = st.selectbox("Feature X", numeric_cols, index=0, key="var_x")
-var_y = st.selectbox("Feature Y", numeric_cols, index=1, key="var_y")
-
-fig_bi = px.scatter(df, x=var_x, y=var_y, title=f"Analyse bivariée : {var_x} vs {var_y}", opacity=0.5)
-fig_bi.add_scatter(x=[client_data[var_x]], y=[client_data[var_y]], mode='markers',
-                   marker=dict(color='red', size=15), name="Client")
-st.plotly_chart(fig_bi, use_container_width=True)
-
-# --- Tableau éditable pour modification client ---
-st.markdown("---")
-st.markdown("## Modifier les informations du client")
-
-# Préparer dataframe modifiable (client uniquement, variables numériques)
-editable_df = pd.DataFrame(client_data[numeric_cols]).T.reset_index()
-editable_df.columns = ["Variable", "Valeur"]
-
-# --- Tableau éditable pour modification client ---
-st.markdown("## Modifier les informations du client")
-
+# Construire un DataFrame 2 colonnes pour edition
 editable_df = pd.DataFrame({
-    "Variable": numeric_cols,
-    "Valeur": [client_data[col] for col in numeric_cols]
+    "Variable": client_data.index,
+    "Valeur": client_data.values
 })
 
+st.subheader("✏️ Modifier les variables du client")
 edited_df = st.data_editor(editable_df, num_rows="dynamic", use_container_width=True)
 
-# Appliquer les modifications
+# === 5) Préparer les données modifiées pour la prédiction ===
 data_for_pred = client_data.copy()
+
 for _, row in edited_df.iterrows():
     var = row["Variable"]
     val = row["Valeur"]
@@ -166,37 +56,63 @@ for _, row in edited_df.iterrows():
         try:
             data_for_pred[var] = float(val)
         except:
+            # En cas de problème de conversion, garder la valeur d'origine
             pass
 
+# Mettre dans DataFrame 2D (une ligne) avec les colonnes attendues par le modèle
 data_for_pred_df = pd.DataFrame([data_for_pred[expected_features]])
 
-if st.button("Recalculer le score avec les valeurs modifiées"):
-    new_pred = model.predict_proba(data_for_pred_df)[0][1] * 100  # en %
-    st.write(f"Nouvelle probabilité de défaut : {new_pred:.2f}%")
+# === 6) PRÉDICTION DU RISQUE DE DÉFAUT ===
+st.subheader("📈 Probabilité de défaut")
+prediction = model.predict_proba(data_for_pred_df)[0][1]
+st.write(f"**Probabilité de défaut :** {prediction:.3f}")
+decision = "✅ Approuvé" if prediction < 0.5 else "❌ Refusé"
+st.markdown(f"### {decision}")
 
-    new_decision = "Accord" if new_pred < 50 else "Refus"
-    if new_decision == "Accord":
-        st.success(f"Décision : {new_decision}")
-    else:
-        st.error(f"Décision : {new_decision}")
+# === 7) EXPLICATION SHAP LOCALE ===
+explainer = shap.TreeExplainer(model['classifier'])
+shap_values_local = explainer(data_for_pred_df)
+if isinstance(shap_values_local, list):
+    local_explanation = shap_values_local[1][0]
+else:
+    local_explanation = shap_values_local[0]
 
-    new_shap_values_local = explainer(data_for_pred_df)
-    new_local_explanation = (
-        new_shap_values_local[1][0] if isinstance(new_shap_values_local, list) else new_shap_values_local[0]
-    )
+fig_local = plt.figure()
+shap.waterfall_plot(local_explanation, show=False)
+st.pyplot(fig_local)
+st.caption("Impact des variables sur la prédiction du client modifié.")
 
-    fig_new_local = plt.figure()
-    shap.waterfall_plot(new_local_explanation, show=False)
-    st.pyplot(fig_new_local)
+# === 8) ANALYSE UNIVARIÉE ET BIVARIÉE ===
+st.subheader("🔍 Analyse Univariée et Bivariée")
 
-    st.caption(
-        """
-        **📝 Explication :** Ce graphique montre l'impact des nouvelles valeurs de features sur la prédiction mise à jour.  
-        🔹 Les valeurs positives augmentent le risque de défaut,  
-        🔹 Les valeurs négatives le réduisent.  
-        """
-    )
+# Univariée : histogramme de la variable modifiée la plus influente (top 1 SHAP)
+shap_importance = np.abs(local_explanation.values)
+top_feature_idx = np.argmax(shap_importance)
+top_feature = data_for_pred_df.columns[top_feature_idx]
 
-# --- Fin ---
-st.markdown("---")
-st.caption("Dashboard fonctionnel avec score, interprétabilité SHAP réelle, comparaisons et édition client via tableau.")
+fig_uni, ax_uni = plt.subplots()
+ax_uni.hist(data[top_feature], bins=30, alpha=0.5, label='Population')
+ax_uni.axvline(data_for_pred_df.iloc[0][top_feature], color='red', linestyle='--', label='Client')
+ax_uni.set_title(f"Distribution univariée : {top_feature}")
+ax_uni.legend()
+st.pyplot(fig_uni)
+
+# Bivariée : scatter plot avec la variable la plus influente vs une autre variable (première variable différente)
+second_feature = None
+for col in data_for_pred_df.columns:
+    if col != top_feature:
+        second_feature = col
+        break
+
+if second_feature:
+    fig_bi, ax_bi = plt.subplots()
+    ax_bi.scatter(data[top_feature], data[second_feature], alpha=0.3, label='Population')
+    ax_bi.scatter(data_for_pred_df.iloc[0][top_feature], data_for_pred_df.iloc[0][second_feature], color='red', s=100, label='Client')
+    ax_bi.set_xlabel(top_feature)
+    ax_bi.set_ylabel(second_feature)
+    ax_bi.set_title(f"Analyse bivariée : {top_feature} vs {second_feature}")
+    ax_bi.legend()
+    st.pyplot(fig_bi)
+else:
+    st.write("Pas assez de variables pour afficher un graphique bivarié.")
+
