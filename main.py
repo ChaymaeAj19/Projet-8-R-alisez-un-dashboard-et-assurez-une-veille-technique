@@ -123,38 +123,51 @@ fig_bi.add_scatter(x=[client_data[var_x]], y=[client_data[var_y]], mode='markers
                    marker=dict(color='red', size=15), name="Client")
 st.plotly_chart(fig_bi, use_container_width=True)
 
-# --- Modification des 10 features les plus importantes et nouvelle prédiction ---
-st.markdown("---")
-st.markdown("## Modifier les 10 features les plus importantes et recalculer")
+st.subheader("✏️ Modification des Informations du Client")
 
-shap_importance = np.abs(local_exp.values)
-top_10_idx = np.argsort(shap_importance)[-10:]
-top_10_features = [X_client.columns[i] for i in top_10_idx]
+modifiable_client_data = X_client.copy()
+modified_features = {}
 
-modifiable_data = X_client.copy()
-modified_values = {}
+st.write("Modifiez les valeurs des variables ci-dessous puis cliquez sur 'Recalculer le score'.")
 
-for feature in top_10_features:
+for feature in numeric_cols:
     min_val = float(df[feature].min())
     max_val = float(df[feature].max())
-    default_val = float(modifiable_data[feature].values[0])
-    modified_values[feature] = st.slider(f"{feature}", min_val, max_val, default_val)
+    default_val = float(client_data[feature])
+    step_val = (max_val - min_val) / 100 if max_val != min_val else 0.01
 
-for feature, val in modified_values.items():
-    modifiable_data[feature] = val
+    modified_features[feature] = st.slider(
+        label=f"{feature}",
+        min_value=min_val,
+        max_value=max_val,
+        value=default_val,
+        step=step_val
+    )
 
-if st.button("Recalculer score modifié"):
-    new_pred = model.predict_proba(modifiable_data)[0][1]
-    new_decision = "Refus" if new_pred >= 0.5 else "Accord"
-    st.metric("Nouvelle probabilité défaut (%)", f"{new_pred*100:.2f}%")
-    if new_decision == "Accord":
-        st.success(f"Décision : {new_decision}")
-    else:
-        st.error(f"Décision : {new_decision}")
+# Mise à jour du dataframe avec les nouvelles valeurs
+for feature, value in modified_features.items():
+    modifiable_client_data[feature] = value
 
-    new_shap_values = explainer(modifiable_data)
-    new_local_exp = new_shap_values[1][0] if isinstance(new_shap_values, list) else new_shap_values[0]
+if st.button("Recalculer le score avec les valeurs modifiées"):
+    new_pred = model.predict_proba(modifiable_client_data)[0][1]
+    st.write(f"Nouvelle probabilité de défaut : {new_pred:.3f}%")
+
+    new_decision = "✅ Accord" if new_pred < 0.5 else "❌ Refus"
+    st.markdown(f"### {new_decision}")
+
+    new_shap_values_local = explainer(modifiable_client_data)
+    new_local_explanation = (
+        new_shap_values_local[1][0] if isinstance(new_shap_values_local, list) else new_shap_values_local[0]
+    )
 
     fig_new_local = plt.figure()
-    shap.waterfall_plot(new_local_exp, show=False)
+    shap.waterfall_plot(new_local_explanation, show=False)
     st.pyplot(fig_new_local)
+
+    st.caption(
+        """
+        **📝 Explication :** Ce graphique montre l'impact des nouvelles valeurs de features sur la prédiction mise à jour.  
+        🔹 Les valeurs positives augmentent le risque de défaut,  
+        🔹 Les valeurs négatives le réduisent.  
+        """
+    )
