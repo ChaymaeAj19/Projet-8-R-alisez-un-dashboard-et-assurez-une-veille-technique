@@ -37,9 +37,9 @@ client_id = st.selectbox("🔎 Sélectionnez un client", client_ids)
 client_data = df[df["SK_ID_CURR"] == client_id].iloc[0]
 
 # --- Fonction API prédiction ---
-def predict_api(data_dict):
+def predict_api(data_dict, use_id=True):
     try:
-        if "SK_ID_CURR" in data_dict:
+        if use_id and "SK_ID_CURR" in data_dict:
             payload = {"SK_ID_CURR": int(data_dict["SK_ID_CURR"])}
         else:
             payload = {"data": data_dict}
@@ -156,8 +156,10 @@ with st.form("edit_form"):
     submit_edit = st.form_submit_button("Recalculer score")
 
 if submit_edit:
-    res_edit = predict_api(edited_features)
+    # Envoi direct des données modifiées (sans SK_ID_CURR)
+    res_edit = predict_api(edited_features, use_id=False)
     score_edit = res_edit.get("probability", None)
+    
     if score_edit is not None:
         st.success(f"Score recalculé : {score_edit:.2f}%")
         decision_edit = "Accord" if score_edit < 50 else "Refus"
@@ -166,7 +168,7 @@ if submit_edit:
         else:
             st.error(f"Décision : {decision_edit}")
     else:
-        st.error("Erreur lors de la prédiction du score modifié.")
+        st.error(f"Erreur lors de la prédiction du score modifié : {res_edit.get('error', 'Erreur inconnue')}")
 
 # --- Fin ---
 st.markdown("---")
